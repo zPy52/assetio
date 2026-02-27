@@ -1,206 +1,310 @@
 # AssetIO
 
-**TypeScript SDK for programmatic video editing.** Build a composition with cuts, scales, crops, overlays, zoom, blur, and fades—then export to a file or preview frames in real time. Same pipeline for export and preview; no separate “preview mode.”
+**TypeScript SDK for programmatic image editing and composition.** Build an asset pipeline with chainable operations: crop, resize, rotate, overlays, shapes, text, effects, and masks—then export to a file, base64, or bytes. Same pipeline for all outputs; intent is expressed in plain language (`.crop`, `.resize`, `.overlay`, etc.), similar to ImageMagick.
 
-- **Node.js only** — uses [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) for encoding. For browser UIs, run the SDK on a server and expose preview via HTTP (see [Preview in the browser](#preview-in-the-browser)).
-- **Chainable API** — `AssetIOMedia` methods return `this` so you can compose in one expression.
-- **Hardware encoding** — optional GPU encoders (NVENC, QSV, AMF, VideoToolbox, etc.) with automatic fallback to CPU.
+- **Node.js** — uses [Sharp](https://sharp.pixelplumbing.com/) and [@napi-rs/canvas](https://github.com/napi-rs/node-canvas) for processing.
+- **Chainable API** — `asset()` returns an `Asset` whose methods return `this` so you can compose in one expression.
+- **Rich composition** — overlay shapes (Ellipse, Rectangle, Line, Polygon, Star, Vector), text, and images; group layers; apply alpha/luminance/clip masks and Figma-style effects (shadows, blur, noise, texture, glass).
 
 ## Install
 
 ```bash
-pnpm add assetio
-# or
 npm install assetio
+# or
+pnpm add assetio
 ```
 
-**Requirements:** Node.js ≥ 18. The `ffmpeg-static` binary is used for all processing; no system FFmpeg required.
+**Requirements:** Node.js ≥ 18.
 
 ## Quick start
 
 ```ts
-import { AssetIOMedia } from 'assetio';
+import { asset, Color, Rectangle } from 'assetio';
 
-const media = new AssetIOMedia({ input: 'input.mp4' })
-  .scale(1.2)
-  .cut({ cuts: [{ from: 5, to: 65 }] })
-  .overlay({ src: 'logo.png', at: 2, anchor: 'top-right' });
+const image = asset('input.jpg')
+  .crop({ x: 120, y: 80, width: 600, height: 600 })
+  .resize({ width: 1080, height: 1080, fit: 'cover' })
+  .rotate({ angle: 2.5, background: Color.hex('#000000') })
+  .overlay(
+    new Rectangle({ width: 90, height: 90 }).fill(Color.hex('#fff')),
+    { position: { x: '5%', y: '5%' } },
+  );
 
-await media.export('output.mp4');
+await image.export({ format: 'file', path: 'output.jpg' });
 ```
 
 ## Composition API
 
-Create a `AssetIOMedia` instance and chain operations. Order matters: operations are applied in sequence (e.g. scale then crop then overlay).
+Create an asset with `asset(input)` and chain operations. Order matters: operations are applied in sequence (e.g. crop → resize → overlay).
 
 ### Input
 
-- **Constructor:** `new AssetIOMedia({ input?: Source, hardware?: string })`
+- **Constructor:** `asset(source)` or `asset({ input: source })`.
 - **Source:** file path (string), `URL`, `ArrayBuffer`, `Uint8Array`, or `Buffer`.
-- **Set later:** `media.setInput(source)`.
 
-### Trimming and layout
-
-| Method | Description |
-|--------|-------------|
-| `cut({ cuts })` | Keep one or more segments. `cuts`: `Array<{ from: number; to?: number }>`. Overlapping/adjacent ranges are merged. |
-| `scale(factor)` | Scale width and height by `factor` (e.g. `0.5` = half size). |
-| `crop(options)` | Crop to a region or aspect ratio. Use `width`/`height` (pixels or `'50%'`) or `aspectRatio: '16:9' \| '4:3' \| '1:1'` with optional `anchor`, `x`, `y`. |
-
-### Overlays
+### Geometric operations
 
 | Method | Description |
 |--------|-------------|
-| `overlay({ src, at, anchor?, x?, y?, zIndex?, shadow? })` | Composite an image or another `AssetIOMedia` on top at time `at` (seconds). `anchor`: placement (e.g. `'top-right'`, `'center'`). `src` can be a file path or an `Exportable` (e.g. from `AssetIOMedia.factory.fromImage()`). |
+| `crop(area)` | Crop to a region. `area`: `{ x, y, width, height }` (pixels or `'50%'`). |
+| `resize(options)` | Resize. `width`/`height` (pixels or `'50%'`), `fit`: `'fill'` \| `'contain'` \| `'cover'` \| `'none'`. |
+| `rotate(options)` | Rotate by `angle` (degrees). Optional `background` (e.g. `Color.hex('#101010')`). |
+| `flip()` | Vertical mirror. |
+| `flop()` | Horizontal mirror. |
+| `roll(offset)` | Roll image. `offset`: `{ x, y }` (pixels or percentage). |
+| `distort(options)` | Distort. `type`: e.g. `'perspective'`, `'affine'`; `args`: number array. |
 
-### Effects
-
-| Method | Description |
-|--------|-------------|
-| `zoom({ scale, from, to?, anchor?, x?, y?, curve?, motionBlur? })` | Animated zoom. `scale`: `{ start?: number, end: number }`. Optional motion blur. |
-| `blur({ intensity, from, to?, style?, curve? })` | Time-ranged blur. `style`: `'box'` \| `'gaussian'`. |
-| `fadeIn({ from, to?, curve? })` | Fade in from black. |
-| `fadeOut({ from, to?, curve? })` | Fade out to black. |
-
-Use `Curves` for easing (e.g. `Curves.easeInOut`, `Curves.linear`). All effect types accept an optional `curve`.
-
-### Audio
+### Color / tonal operations
 
 | Method | Description |
 |--------|-------------|
-| `setVolume(factor)` | Multiply volume by `factor` (e.g. `0.5` = half). |
+| `grayscale()` | Convert to grayscale. |
+| `negate()` | Negate colors. |
+| `normalize()` | Normalize levels. |
+| `equalize()` | Equalize histogram. |
+| `autoLevel()` | Auto level. |
+| `autoGamma()` | Auto gamma. |
+| `gamma(value)` | Gamma correction. |
+| `level(options)` | Level adjustment. `black`/`white` (e.g. `'2%'`, `'98%'`), `gamma`. |
+| `linearStretch(options)` | Linear stretch. `black`/`white` percentage. |
+| `contrast(options?)` | Contrast. Optional `sharpen: true`. |
+| `posterize(levels)` | Posterize to `levels` (number). |
+| `sepiaTone(options?)` | Sepia. Optional `threshold` (e.g. `'80%'`). |
+| `tint(options)` | Tint. `color`: e.g. `Color.hex('#89a8ff')`. |
+| `colorize(options)` | Colorize. `red`, `green`, `blue` (numbers). |
+| `threshold(options)` | Threshold. `value` (e.g. `'54%'`), optional `type`: `'global'` \| `'adaptive'` \| `'black'` \| `'white'`. |
+| `quantize(options)` | Quantize. `colors`, optional `colorspace`, `dither`. |
+| `segment(options?)` | Segment. Optional `threshold`, `colorspace`. |
+
+### Blur / sharpen / noise
+
+| Method | Description |
+|--------|-------------|
+| `blur(points, options?)` | Localized blur inside a contour. `points`: array of `{ x, y }` (pixels or `'5%'`), at least 3. `options`: `mode` (`'pixel'` \| `'gaussian'`), `intensity`. |
+| `sharpen(options?)` | Sharpen. Optional `radius`, `sigma`. |
+| `adaptiveSharpen(options?)` | Adaptive sharpen. |
+| `unsharpMask(options)` | Unsharp mask. `radius`, `sigma`, `amount`, `threshold`. |
+| `motionBlur(options)` | Motion blur. `radius`, `sigma`, `angle`. |
+| `rotationalBlur(options)` | Rotational blur. `angle`. |
+| `medianFilter(options?)` | Median filter. Optional `radius`. |
+| `addNoise(options?)` | Add noise. Optional `type`, `attenuate`. |
+| `despeckle()` | Despeckle. |
+| `waveletDenoise(options?)` | Wavelet denoise. Optional `threshold`, `softness`. |
+
+### Artistic / distortion
+
+| Method | Description |
+|--------|-------------|
+| `charcoal(options?)` | Charcoal effect. Optional `radius`, `sigma`. |
+| `sketch(options?)` | Sketch. Optional `radius`, `sigma`, `angle`. |
+| `oilPaint(options?)` | Oil paint. Optional `radius`. |
+| `emboss(options?)` | Emboss. Optional `radius`, `sigma`. |
+| `solarize(options?)` | Solarize. Optional `threshold`. |
+| `spread(options?)` | Spread. Optional `radius`. |
+| `implode(factor)` | Implode (negative = explode). |
+| `swirl(degrees)` | Swirl. |
+| `wave(options?)` | Wave. Optional `amplitude`, `wavelength`. |
+| `vignette(options?)` | Vignette. Optional `x`, `y`, `blur`, `color`. |
+| `shade(options)` | Shade. `azimuth`, `elevation`, optional `gray`. |
+| `raise(options)` | Raise. `width`, `height`, `raise`. |
+| `polaroid(options?)` | Polaroid frame. Optional `angle`, `caption`. |
+| `fx(expression)` | Raw FX expression (e.g. `'u^1.03'`). |
+| `morphology(options)` | Morphology. `method`, `kernel`, `iterations`. |
+| `detectEdges(options?)` | Edge detection. Optional `radius`. |
+| `convolve(options)` | Convolve. `kernel`: 2D number array. |
+
+### Border / frame
+
+| Method | Description |
+|--------|-------------|
+| `border(options)` | Border. `width`, `height`, `color`. |
+| `frame(options)` | Frame. `width`, `height`, optional `innerBevel`, `outerBevel`, `color`. |
+
+### Overlay and group
+
+| Method | Description |
+|--------|-------------|
+| `overlay(content, options?)` | Composite a shape, text, image source, or another exportable on top. `options`: `position` (`{ x, y }` — pixels or `'50%'`), `anchor` (e.g. `'top-left'`, `'center'`), `mask` (e.g. `Mask.clip(shape)`). |
+| `group(layers, options?)` | Composite multiple layers as a group. `layers`: array of `{ layer, position?, anchor? }`. `options`: `mask`. |
 
 ### Export
 
 ```ts
-await media.export('output.mp4', {
-  hardware?: string,  // encoder id from AssetIOMedia.hardware.list()
-  quality?: {
-    preset?: 'balanced' | 'high' | 'very-high',
-    bitrateMbps?: number,
-    crf?: number,
-    cpuPreset?: 'ultrafast' | 'fast' | 'medium' | ...
-  }
-});
+// Write to file
+await image.export({ format: 'file', path: 'output.jpg' });
+
+// Get base64 data URL
+const dataUrl = await image.export({ format: 'base64', mimeType: 'image/jpeg' });
+
+// Get raw bytes (Buffer)
+const bytes = await image.export({ format: 'bytes' });
 ```
 
-Export uses the same filter graph as preview (cuts, scale, crop, effects, overlays). You can list encoders with `AssetIOMedia.hardware.list()` and pick one, or omit for the default (GPU if available, else CPU).
+## Shapes
 
-## Preview
-
-Preview uses the **same pipeline** as export: you get frames (or metadata) for the composed timeline without writing a file.
-
-### Core (any environment)
+Overlay shapes (Figma-style): **Ellipse**, **Rectangle**, **Line**, **Polygon**, **Star**, and **Vector** (SVG-style path). Chain `.fill()` and `.stroke()` for styling.
 
 ```ts
-// Load once
-const info = await media.preview.metadata();
-// → { duration: number, width: number, height: number, fps?: number }
+import {
+  Ellipse,
+  Rectangle,
+  Line,
+  Polygon,
+  Star,
+  Vector,
+  Color,
+  GradientColor,
+} from 'assetio';
 
-// Frame at time t (composition timeline; t clamped to [0, duration])
-const pngBuffer = await media.preview.frame(12.34);
-// → Buffer (PNG). Use in Node or send to a client.
+const rect = new Rectangle({
+  width: 300,
+  height: 150,
+  cornerRadius: 12,
+  // or per-corner: cornerRadius: { tl: 12, tr: 0, br: 12, bl: 0 },
+})
+  .fill(Color.hex('#6366f1'))
+  .stroke({
+    color: Color.hex('#312e81'),
+    width: 2,
+    position: 'inside', // 'inside' | 'outside' | 'center'
+    dash: [8, 4],
+    cap: 'round',
+    join: 'miter',
+  });
+
+const ellipse = new Ellipse({ width: 200, height: 100 });
+const polygon = new Polygon({ sides: 6, radius: 100, rotation: 0 });
+const star = new Star({ points: 5, radius: 100, innerRadius: 0.382 });
+const line = new Line({ start: [0, 0], end: [200, 100], endCap: 'arrow' });
+const vector = new Vector({ d: 'M 0 0 L 100 0 L 50 100 Z', closed: true });
+
+asset('photo.png').overlay(rect, { position: { x: 20, y: 20 } });
 ```
 
-Optional:
+Use `ShapeOps.subtract(shapeA, shapeB)` (and similar) to combine shapes; result is a `Vector`.
 
-- `media.preview.frames({ from?, to?, fps? })` — `AsyncIterable<Buffer>` of PNGs.
-- `media.preview.exportSegment({ from, duration, path?, quality?, hardware? })` — export a short low-res segment (e.g. for `<video>` playback). `quality`: `'preview'` \| `'low'` \| `'medium'`.
-
-### Bridge (play / pause / seek + state)
-
-For UIs you can use a **bridge** that wraps `metadata()` and `frame(t)` and adds play/pause/seek and subscribable state:
+## Text
 
 ```ts
-const bridge = media.preview.bridge({ defaultFps: 15 });
+import { Text, TextRun, Font, Color } from 'assetio';
 
-await bridge.ready();
-
-bridge.subscribe((state) => {
-  // state: { status, playing, time, duration, frameUrl, metadata, error }
-  if (state.frameUrl) img.src = state.frameUrl;
-  slider.value = String(state.time);
+const text = new Text('Hello world', {
+  font: Font.use('Inter', { size: 48, weight: 600 }),
+  color: Color.hex('#1a1a1a'),
+  align: 'center',
+  verticalAlign: 'top',
+  width: 400,
+  maxHeight: 200,
+  overflow: 'ellipsis',
+  lineHeight: 1.5,
+  letterSpacing: 0.02,
 });
 
-bridge.play({ fps: 15 });
-bridge.pause();
-bridge.toggle();
-await bridge.moveTo(5.5);
-await bridge.stepBy(1 / 15);
+// Mixed styling with TextRun
+const mixed = new Text(
+  [
+    new TextRun('Hello ', { font: Font.use('Inter', { size: 48, weight: 400 }), color: Color.hex('#1a1a1a') }),
+    new TextRun('world', { font: Font.use('Inter', { size: 48, weight: 700 }), color: Color.hex('#6366f1') }),
+  ],
+  { width: 400, align: 'left' },
+);
 
-// When done
-bridge.dispose();
+asset('photo.png').overlay(text, { position: { x: 50, y: 50 } });
 ```
 
-The bridge manages object URLs for frames (or data URLs in Node). In React you can pass `useSyncExternalStore` so `bridge.use.frameUrl()`, `bridge.use.time()`, etc. stay in sync.
-
-## Preview in the browser
-
-The SDK runs in Node. To preview in a browser, run a small server that creates a `AssetIOMedia` instance and exposes:
-
-- `GET /api/metadata` → JSON `{ duration, width, height, fps }`
-- `GET /api/frame?t=<seconds>` → PNG body
-
-The repo includes a vanilla JS example: a Node server plus an HTML page with a scrubber and play/pause. See [Examples](#examples).
-
-## Factory: generated clips
-
-Build clips from images or solid colors to use as overlays or standalone exports:
+Load fonts before use:
 
 ```ts
-const imageClip = AssetIOMedia.factory.fromImage({
-  src: 'poster.png',
-  duration: 5,
-  width?: 1920,
-  height?: 1080,
-});
-
-const colorClip = AssetIOMedia.factory.fromColor({
-  color: '#1a1a2e',
-  duration: 3,
-});
-
-const gradientClip = AssetIOMedia.factory.fromGradient({
-  gradients: ['#0f0c29', '#302b63', '#24243e'],
-  orientation: 'top-to-bottom',
-  duration: 4,
-});
+await Font.load('Cardo', './fonts/Cardo-Variable.ttf');
+await Font.load('Cardo', 'https://fonts.example.com/cardo.woff2');
+Font.use('Cardo', { size: 48 });
 ```
 
-Each returns an `Exportable`; use as `overlay({ src: imageClip, at: 0, anchor: 'center' })` or call `.export(path)`.
+## Effects
 
-## Hardware encoders
+Figma-style effects on shapes (and text): drop shadow, inner shadow, layer blur, background blur, noise, texture, glass. Chain with `.effect()`.
 
 ```ts
-const encoders = AssetIOMedia.hardware.list();        // all
-const gpuOnly = AssetIOMedia.hardware.list({ type: 'gpu' });
-const defaultEncoder = AssetIOMedia.hardware.default();
+import { Ellipse, Effect, Color } from 'assetio';
 
-await media.export('out.mp4', { hardware: defaultEncoder.id });
+const shape = new Ellipse({ width: 200, height: 200 })
+  .fill(Color.hex('#6366f1'))
+  .effect(
+    Effect.dropShadow({
+      offset: { x: 4, y: 8 },
+      blur: 16,
+      spread: 0,
+      color: Color.hex('#000', { opacity: 0.3 }),
+    }),
+  )
+  .effect(Effect.innerShadow({ offset: { x: 0, y: 4 }, blur: 8, color: Color.hex('#000', { opacity: 0.2 }) }))
+  .effect(Effect.layerBlur({ radius: 12 }))
+  .effect(Effect.backgroundBlur({ radius: 20 }))
+  .effect(Effect.noise({ opacity: 0.15, size: 1, mode: 'color' }))
+  .effect(Effect.texture({ source: './textures/paper.png', opacity: 0.4, blendMode: 'multiply', scale: 1 }))
+  .effect(Effect.glass({ blur: 24, opacity: 0.6, tint: Color.hex('#ffffff', { opacity: 0.1 }), refraction: 0.05 }));
 ```
 
-## Examples
+## Masks
 
-- **Preview server + HTML UI** — Play, pause, and scrub a `AssetIOMedia` in the browser. From the repo root:
+Mask an overlay: **clip** (hard crop to shape geometry), **alpha** (shape transparency controls visibility), **luminance** (brightness controls visibility).
 
-  ```bash
-  pnpm build
-  node examples/preview/server.mjs path/to/your/video.mp4
-  ```
+```ts
+import { asset, Ellipse, Rectangle, Mask, Color, GradientColor } from 'assetio';
 
-  Then open http://localhost:8765 and use the slider and buttons to preview.
+// Clip: hard crop to the ellipse
+asset('photo.png').overlay(
+  new Ellipse({ width: 400, height: 400 }),
+  {
+    position: { x: 100, y: 100 },
+    mask: Mask.clip(),
+  },
+);
+
+// Alpha mask: gradient fade
+asset('photo.png').overlay(
+  new Rectangle({ width: 600, height: 400 }).fill(
+    GradientColor.linear({
+      direction: GradientColor.direction({ start: [0, 0], end: [1, 0] }),
+      colors: [Color.hex('#fff', { opacity: 1 }), Color.hex('#fff', { opacity: 0 })],
+      stops: [0, 1],
+    }),
+  ),
+  { position: { x: 0, y: 0 }, mask: Mask.alpha() },
+);
+
+// Luminance mask
+asset('photo.png').overlay(someShape, { mask: Mask.luminance() });
+
+// Mask with external image
+asset('photo.png').overlay(someShape, { mask: Mask.alpha({ source: './masks/feather.png' }) });
+
+// Group with shared mask
+asset('photo.png').group(
+  [
+    { layer: new Ellipse({ width: 200, height: 200 }).fill(Color.hex('#6366f1')), position: { x: 0, y: 0 } },
+    { layer: new Rectangle({ width: 200, height: 200 }).fill(Color.hex('#f00')), position: { x: 50, y: 50 } },
+  ],
+  { mask: Mask.clip(new Ellipse({ width: 220, height: 220 })) },
+);
+```
 
 ## API overview
 
 | Area | Main APIs |
 |------|-----------|
-| **Input** | `new AssetIOMedia({ input, hardware })`, `setInput(source)` |
-| **Edit** | `cut`, `scale`, `crop`, `overlay`, `setVolume` |
-| **Effects** | `zoom`, `blur`, `fadeIn`, `fadeOut` (optional `curve` from `Curves`) |
-| **Export** | `export(path, options?)` |
-| **Preview** | `preview.metadata()`, `preview.frame(t)`, `preview.frames()`, `preview.exportSegment()`, `preview.bridge(options)` |
-| **Factory** | `AssetIOMedia.factory.fromImage`, `fromColor`, `fromGradient` |
-| **Hardware** | `AssetIOMedia.hardware.list()`, `default()`, `isAvailable(id)` |
+| **Input** | `asset(source)`, `asset({ input: source })` |
+| **Geometric** | `crop`, `resize`, `rotate`, `flip`, `flop`, `roll`, `distort` |
+| **Color / tonal** | `grayscale`, `negate`, `normalize`, `equalize`, `autoLevel`, `autoGamma`, `gamma`, `level`, `linearStretch`, `contrast`, `posterize`, `sepiaTone`, `tint`, `colorize`, `threshold`, `quantize`, `segment` |
+| **Blur / sharpen** | `blur`, `sharpen`, `adaptiveSharpen`, `unsharpMask`, `motionBlur`, `rotationalBlur`, `medianFilter`, `addNoise`, `despeckle`, `waveletDenoise` |
+| **Artistic** | `charcoal`, `sketch`, `oilPaint`, `emboss`, `solarize`, `spread`, `implode`, `swirl`, `wave`, `vignette`, `shade`, `raise`, `polaroid`, `fx`, `morphology`, `detectEdges`, `convolve` |
+| **Border / frame** | `border`, `frame` |
+| **Composition** | `overlay`, `group` |
+| **Export** | `export({ format: 'file', path } \| { format: 'base64', mimeType? } \| { format: 'bytes' })` |
+| **Shapes** | `Ellipse`, `Rectangle`, `Line`, `Polygon`, `Star`, `Vector` — `.fill()`, `.stroke()`, `ShapeOps` |
+| **Text** | `Text`, `TextRun`, `Font` |
+| **Effects** | `Effect.dropShadow`, `innerShadow`, `layerBlur`, `backgroundBlur`, `noise`, `texture`, `glass` |
+| **Masks** | `Mask.clip`, `Mask.alpha`, `Mask.luminance` |
 
 ## License
 

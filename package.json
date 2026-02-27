@@ -1,7 +1,7 @@
 {
   "name": "assetio",
   "version": "1.0.0",
-  "description": "TypeScript SDK for programmatic video editing",
+  "description": "TypeScript SDK for programmatic media editing and composition",
   "type": "module",
   "files": [
     "dist"
