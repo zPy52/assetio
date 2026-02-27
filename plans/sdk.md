@@ -15,6 +15,18 @@ const image = asset({ input: 'a.png' })
   });
 ```
 
+You can also create blank images from a color or gradient, then chain the same operations:
+
+```ts
+import { asset, Color, GradientColor } from 'assetio';
+
+asset.fromColor(Color.hex('#fff'), { width: 1080, height: 720 })
+  .blur(...) // and so on
+
+asset.fromGradient(GradientColor.linear(...), { width: 1080, height: 720 })
+  .blur(...) // and so on
+```
+
 The original localized blur use-case still exists and remains first-class:
 
 ```ts

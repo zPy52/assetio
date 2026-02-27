@@ -26,6 +26,8 @@ Load a source → chain operations (each method returns `this`) → call `export
 
 **Source types:** `string` (file path or `data:` URL), `URL` (only `file:`), `ArrayBuffer`, `Uint8Array`, `Buffer`. All are resolved to bytes at export time.
 
+**Blank canvases:** Create an asset from a solid color or gradient (no image file) with `asset.fromColor(color, { width, height })` and `asset.fromGradient(gradient, { width, height })`. Both return an `Asset` you can chain like any other (e.g. `.blur(...)`, `.overlay(...)`). Use `Color.hex(...)`, `Color.rgb(...)`, etc. for color; `GradientColor.linear(...)` or `GradientColor.radial(...)` for gradient. Size requires positive `width` and `height`.
+
 **Chained pipeline:** Operations run in order. Prefer: base geometry (crop/resize) first, then overlays/group, then global effects.
 
 ## Export

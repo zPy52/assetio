@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 import { promises as fileSystem } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { Color, Ellipse, Mask, Rectangle, Text, asset } from '@/index';
+import { Color, Ellipse, GradientColor, Mask, Rectangle, Text, asset } from '@/index';
 import { createTestOutputPath, exportAssetToTestOutput } from './helpers';
 
 const SAMPLE_IMAGE = 'assets/sample-wallpaper.jpg';
@@ -33,6 +33,22 @@ async function expectOutputToDifferFromSource(outputPath: string, minimumDiffere
   expect(differenceRatio).toBeGreaterThan(minimumDifferenceRatio);
 }
 
+async function toPixelChannels(
+  sourcePath: string,
+  x: number,
+  y: number,
+): Promise<{ r: number; g: number; b: number; a: number }> {
+  const rawImage = await sharp(sourcePath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const channels = rawImage.info.channels;
+  const pixelIndex = (y * rawImage.info.width + x) * channels;
+  return {
+    r: rawImage.data[pixelIndex] ?? 0,
+    g: rawImage.data[pixelIndex + 1] ?? 0,
+    b: rawImage.data[pixelIndex + 2] ?? 0,
+    a: rawImage.data[pixelIndex + 3] ?? 0,
+  };
+}
+
 describe('asset()', () => {
   test('accepts object and direct source input', async () => {
     const fromObject = asset({ input: 'a.png' });
@@ -42,6 +58,63 @@ describe('asset()', () => {
     expect(fromString.toAssetState().input).toBe('b.png');
 
     await exportAssetToTestOutput(asset(SAMPLE_IMAGE), 'asset-accepts-input.jpg');
+  });
+
+  test('creates blank image from color and remains chainable', async () => {
+    const image = asset
+      .fromColor(Color.hex('#ffffff'), { width: 1080, height: 720 })
+      .blur(
+        [
+          { x: 100, y: 100 },
+          { x: 980, y: 100 },
+          { x: 980, y: 620 },
+          { x: 100, y: 620 },
+        ],
+        { mode: 'gaussian', intensity: 4 },
+      );
+
+    const outputPath = await exportAssetToTestOutput(image, 'asset-fromColor.jpg');
+    const metadata = await sharp(outputPath).metadata();
+    const centerPixel = await toPixelChannels(outputPath, 540, 360);
+
+    expect(metadata.width).toBe(1080);
+    expect(metadata.height).toBe(720);
+    expect(centerPixel.r).toBeGreaterThanOrEqual(250);
+    expect(centerPixel.g).toBeGreaterThanOrEqual(250);
+    expect(centerPixel.b).toBeGreaterThanOrEqual(250);
+    expect(centerPixel.a).toBeGreaterThanOrEqual(250);
+  });
+
+  test('creates blank image from gradient and remains chainable', async () => {
+    const image = asset
+      .fromGradient(
+        GradientColor.linear({
+          direction: GradientColor.direction({ start: [0, '0%'], end: [0, '100%'] }),
+          colors: [Color.hex('#000000'), Color.hex('#ffffff')],
+          stops: [0, 1],
+        }),
+        { width: 1080, height: 720 },
+      )
+      .blur(
+        [
+          { x: 100, y: 100 },
+          { x: 980, y: 100 },
+          { x: 980, y: 620 },
+          { x: 100, y: 620 },
+        ],
+        { mode: 'gaussian', intensity: 4 },
+      );
+
+    const outputPath = await exportAssetToTestOutput(image, 'asset-fromGradient.jpg');
+    const metadata = await sharp(outputPath).metadata();
+    const topPixel = await toPixelChannels(outputPath, 540, 20);
+    const bottomPixel = await toPixelChannels(outputPath, 540, 700);
+
+    expect(metadata.width).toBe(1080);
+    expect(metadata.height).toBe(720);
+    expect(topPixel.r).toBeLessThan(bottomPixel.r);
+    expect(topPixel.g).toBeLessThan(bottomPixel.g);
+    expect(topPixel.b).toBeLessThan(bottomPixel.b);
   });
 
   test('records blur operations', async () => {

@@ -2,7 +2,7 @@ import type { MaskConfig } from '@/mask';
 import type { BaseShape } from '@/shapes';
 import type { Text } from '@/text';
 import type { Anchor, PlacementValue, Source } from '@/types';
-import type { ColorValue } from '@/color';
+import type { ColorValue, GradientColorValue } from '@/color';
 
 export type BlurPoint = {
   x: PlacementValue;
@@ -638,3 +638,10 @@ export type AssetState = {
 export type AssetConfig = {
   input: Source;
 };
+
+export type AssetCanvasSize = {
+  width: number;
+  height: number;
+};
+
+export type AssetFillValue = ColorValue | GradientColorValue;

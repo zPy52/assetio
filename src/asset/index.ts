@@ -1,7 +1,9 @@
 import type {
   AddNoiseOptions,
+  AssetCanvasSize,
   AssetConfig,
   AssetExportOptions,
+  AssetFillValue,
   AssetLike,
   AssetOperation,
   AssetState,
@@ -49,6 +51,7 @@ import type {
 import { saveBytesToFile, toBase64DataUrl, toSourceBuffer } from '@/asset/export-source';
 import { AssetRendererService } from '@/asset/renderer';
 import type { PlacementValue, Source } from '@/types';
+import type { ColorValue, GradientColorValue, GradientPointValue } from '@/color';
 
 const DEFAULT_OVERLAY_ANCHOR = 'top-left' as const;
 const DEFAULT_OVERLAY_POSITION = { x: 0, y: 0 } as const;
@@ -56,6 +59,7 @@ const DEFAULT_BLUR_MODE = 'pixel' as const;
 const DEFAULT_BLUR_INTENSITY = 1;
 const DEFAULT_CONTRAST_SHARPEN = true;
 const DEFAULT_THRESHOLD_TYPE = 'global' as const;
+const SVG_MIME_TYPE = 'image/svg+xml';
 
 function assertFiniteNumber(value: number, fieldName: string): void {
   if (!Number.isFinite(value)) {
@@ -80,6 +84,76 @@ function assertNonNegativeNumber(value: number, fieldName: string): void {
 function toPlacementNumber(value: PlacementValue): number {
   if (typeof value === 'number') return value;
   return Number.parseFloat(value.slice(0, -1));
+}
+
+function toValidatedCanvasSize(size: AssetCanvasSize): AssetCanvasSize {
+  assertPositiveNumber(size.width, 'Asset canvas width');
+  assertPositiveNumber(size.height, 'Asset canvas height');
+
+  return {
+    width: Math.max(1, Math.round(size.width)),
+    height: Math.max(1, Math.round(size.height)),
+  };
+}
+
+function toSvgColor(color: ColorValue): string {
+  const { r, g, b, a } = color.channels;
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+function toGradientPointNumber(value: GradientPointValue, dimension: number): number {
+  if (typeof value === 'number') return value;
+  const parsed = Number.parseFloat(value.slice(0, -1));
+  if (!Number.isFinite(parsed)) return 0;
+  return (parsed / 100) * dimension;
+}
+
+function toSvgGradientStops(fill: AssetFillValue): string {
+  if (fill.kind === 'color') {
+    return `<stop offset="0%" stop-color="${toSvgColor(fill)}"/><stop offset="100%" stop-color="${toSvgColor(fill)}"/>`;
+  }
+
+  return fill.data.colors
+    .map((color, index) => {
+      const stop = fill.data.stops[index] ?? 0;
+      const offset = Math.max(0, Math.min(1, stop));
+      return `<stop offset="${offset * 100}%" stop-color="${toSvgColor(color)}"/>`;
+    })
+    .join('');
+}
+
+function toSvgMarkupFromFill(fill: AssetFillValue, size: AssetCanvasSize): string {
+  const validatedSize = toValidatedCanvasSize(size);
+  const { width, height } = validatedSize;
+  const stops = toSvgGradientStops(fill);
+  const gradientId = 'assetio-fill-gradient';
+
+  if (fill.kind === 'color') {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="0" y="0" width="${width}" height="${height}" fill="${toSvgColor(fill)}"/></svg>`;
+  }
+
+  if (fill.data.type === 'linear') {
+    const direction = fill.data.direction ?? { start: [0, 0], end: [width, height] };
+    const x1 = toGradientPointNumber(direction.start[0], width);
+    const y1 = toGradientPointNumber(direction.start[1], height);
+    const x2 = toGradientPointNumber(direction.end[0], width);
+    const y2 = toGradientPointNumber(direction.end[1], height);
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><linearGradient id="${gradientId}" gradientUnits="userSpaceOnUse" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}">${stops}</linearGradient></defs><rect x="0" y="0" width="${width}" height="${height}" fill="url(#${gradientId})"/></svg>`;
+  }
+
+  const center = fill.data.center ?? [width / 2, height / 2];
+  const radiusValue = fill.data.radius ?? Math.max(width, height) / 2;
+  const radius =
+    typeof radiusValue === 'number'
+      ? radiusValue
+      : (Number.parseFloat(radiusValue.slice(0, -1)) / 100) * Math.max(width, height);
+  const cx = toGradientPointNumber(center[0], width);
+  const cy = toGradientPointNumber(center[1], height);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><radialGradient id="${gradientId}" gradientUnits="userSpaceOnUse" cx="${cx}" cy="${cy}" r="${radius}">${stops}</radialGradient></defs><rect x="0" y="0" width="${width}" height="${height}" fill="url(#${gradientId})"/></svg>`;
+}
+
+function toSvgDataUrl(svg: string): string {
+  return `data:${SVG_MIME_TYPE};base64,${Buffer.from(svg, 'utf-8').toString('base64')}`;
 }
 
 function hasMixedBlurPointUnits(points: BlurPoint[]): boolean {
@@ -827,7 +901,7 @@ export class Asset implements AssetLike {
   }
 }
 
-export function asset(config: AssetConfig | Source): Asset {
+function createAsset(config: AssetConfig | Source): Asset {
   if (typeof config === 'string' || config instanceof URL) {
     return new Asset(config);
   }
@@ -837,17 +911,38 @@ export function asset(config: AssetConfig | Source): Asset {
   return new Asset(config.input);
 }
 
+function createAssetFromColor(color: ColorValue, size: AssetCanvasSize): Asset {
+  return new Asset(toSvgDataUrl(toSvgMarkupFromFill(color, size)));
+}
+
+function createAssetFromGradient(gradient: GradientColorValue, size: AssetCanvasSize): Asset {
+  return new Asset(toSvgDataUrl(toSvgMarkupFromFill(gradient, size)));
+}
+
+type AssetFactory = {
+  (config: AssetConfig | Source): Asset;
+  fromColor(color: ColorValue, size: AssetCanvasSize): Asset;
+  fromGradient(gradient: GradientColorValue, size: AssetCanvasSize): Asset;
+};
+
+export const asset: AssetFactory = Object.assign(createAsset, {
+  fromColor: createAssetFromColor,
+  fromGradient: createAssetFromGradient,
+});
+
 export type {
   AddNoiseOperation,
   AddNoiseOptions,
   AdaptiveSharpenOperation,
   AssetConfig,
+  AssetCanvasSize,
   AssetBase64ExportOptions,
   AssetBytesExportOptions,
   AssetExportFormat,
   AssetExportOptions,
   AssetFileExportOptions,
   AssetLike,
+  AssetFillValue,
   AssetOperation,
   AssetPosition,
   AssetState,

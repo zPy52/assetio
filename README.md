@@ -41,6 +41,7 @@ Create an asset with `asset(input)` and chain operations. Order matters: operati
 
 - **Constructor:** `asset(source)` or `asset({ input: source })`.
 - **Source:** file path (string), `URL`, `ArrayBuffer`, `Uint8Array`, or `Buffer`.
+- **Blank canvases:** `asset.fromColor(color, { width, height })` — create an image filled with a solid color (e.g. `Color.hex('#fff')`). `asset.fromGradient(gradient, { width, height })` — create an image filled with a gradient (e.g. `GradientColor.linear(...)`). Both return an `Asset` you can chain (`.blur(...)`, `.overlay(...)`, etc.).
 
 ### Geometric operations
 
@@ -293,7 +294,7 @@ asset('photo.png').group(
 
 | Area | Main APIs |
 |------|-----------|
-| **Input** | `asset(source)`, `asset({ input: source })` |
+| **Input** | `asset(source)`, `asset({ input: source })`, `asset.fromColor(color, size)`, `asset.fromGradient(gradient, size)` |
 | **Geometric** | `crop`, `resize`, `rotate`, `flip`, `flop`, `roll`, `distort` |
 | **Color / tonal** | `grayscale`, `negate`, `normalize`, `equalize`, `autoLevel`, `autoGamma`, `gamma`, `level`, `linearStretch`, `contrast`, `posterize`, `sepiaTone`, `tint`, `colorize`, `threshold`, `quantize`, `segment` |
 | **Blur / sharpen** | `blur`, `sharpen`, `adaptiveSharpen`, `unsharpMask`, `motionBlur`, `rotationalBlur`, `medianFilter`, `addNoise`, `despeckle`, `waveletDenoise` |
