@@ -1,0 +1,3 @@
+- Always use npm
+- Whenever you are required to add or refactor logic (including the creation of UI components), like state management, utils, services, controllers... make sure to explore the `skills/modular-code/SKILL.md` skill and follow it
+- When coming up with names for methods, use `skills/naming/SKILL.md`
